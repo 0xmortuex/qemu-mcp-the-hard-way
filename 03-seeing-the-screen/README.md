@@ -83,7 +83,9 @@ settled screen, two frames 0.35s apart: 18 px differ (the blinking cursor)
 Eighteen pixels: a 9×2 block, the VGA text-mode cursor's underline, blinking at about
 2 Hz. QEMU renders the blink into `screendump`, so a byte-identical comparison can't
 succeed on any text console with a visible cursor. That covers BIOS screens, bootloaders,
-Linux consoles and most hobby kernels.
+Linux consoles and most hobby kernels. qemu-mcp shipped exactly this bug: its
+`qemu_wait_screen` compared frame hashes and timed out on every text console. Writing this
+module found it, and qemu-mcp now uses the threshold below (commit `1d00b93`).
 
 ## Change Magnitude, Not Change
 

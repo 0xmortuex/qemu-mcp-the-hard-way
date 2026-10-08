@@ -91,8 +91,9 @@ for ch in text:
 
 Type `café` and it sends `c`, `a`, `f`, then raises on `é`. The guest now holds `caf`
 in its line buffer. The agent got an error, and its next attempt at `café` types into a
-line that already says `caf`. That's a real hazard in qemu-mcp's `qemu_type` too: it
-translates while it sends.
+line that already says `caf`. qemu-mcp's `qemu_type` had this hazard too: it translated
+while it sent. Writing this module found it, and qemu-mcp now validates first (commit
+`1d00b93`).
 
 The fix is to translate the whole string first, so a bad character fails before
 anything reaches the guest:

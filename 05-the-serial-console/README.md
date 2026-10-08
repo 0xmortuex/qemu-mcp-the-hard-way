@@ -105,9 +105,13 @@ The demo proves the stale reply is skipped: after sending `pong` from the new of
 the text it waited on doesn't contain `ping`.
 
 qemu-mcp's `qemu_wait_serial` reads the log incrementally *within* one call, so each
-poll reads only new bytes. But every call starts again from byte 0. Wait twice for the
-same marker and the second wait matches the first occurrence. A `since` offset returned
-to the agent, as here, is the fix. It's a good first contribution to qemu-mcp.
+poll reads only new bytes. But every call used to start again from byte 0: wait twice for
+the same marker and the second wait matched the first occurrence. Writing this module
+found that. qemu-mcp fixed it (commit `1d00b93`) by keeping the offset itself, per VM,
+instead of returning it to the agent: each wait searches only output after the previous
+match, and `from_start=True` searches the whole log. That's the other design choice
+from the `since` offset here. It keeps the tool's interface small, and the agent can't
+pass back a stale offset.
 
 ## Line Endings You Can't Trust
 
