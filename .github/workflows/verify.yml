@@ -1,0 +1,23 @@
+name: Verify every module
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "37 5 * * 1"   # weekly: catch drift in QEMU / mcp
+
+jobs:
+  verify:
+    # Linux only: QEMU installs in one apt line here. Every module was also
+    # verified on Windows (QEMU 11) by hand; see the README.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 qemu-utils
+      - run: qemu-system-i386 --version
+      - run: pip install -r requirements.txt
+      - run: python verify.py
