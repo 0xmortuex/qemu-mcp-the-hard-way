@@ -130,6 +130,8 @@ can't delete a file a dead process still holds open.
 
 MIT. Use it, modify it, ship it.
 
+[![M8ven Verified](https://m8ven.ai/badge/mcp/0xmortuex-qemu-mcp-the-hard-way-15dpgx?variant=verified&v=0afeddc389f0596c52101659abd79b31)](https://m8ven.ai/mcp/0xmortuex-qemu-mcp-the-hard-way-15dpgx?s=readme)
+
 ---
 
 Built by [0xmortuex](https://github.com/0xmortuex)
