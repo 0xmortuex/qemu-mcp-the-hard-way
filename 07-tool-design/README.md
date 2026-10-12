@@ -128,7 +128,7 @@ gives it four hints per tool: `readOnlyHint`, `destructiveHint`, `idempotentHint
 without stating them:
 
 ```python
-@tool(read_only=False, destructive=True, idempotent=False, open_world=False)
+@tool(read_only=False, destructive=True, idempotent=True, open_world=False)
 def qemu_stop(name: str) -> str:
 ```
 
@@ -137,7 +137,9 @@ The values are claims about behaviour, so set them from the code, not from a sca
 - `qemu_wait_serial` only reads the log: read-only and idempotent.
 - `qemu_type` is destructive. Keystrokes can do anything the guest allows,
   `rm -rf` included.
-- `qemu_stop` is destructive and *not* idempotent: a second call raises.
+- `qemu_stop` is destructive, and idempotent. MCP defines idempotent by effect: a
+  second call changes nothing more. That it reports an error doesn't matter, just as
+  deleting a file twice is idempotent.
 - `qemu_boot` is **not** destructive, although it calls `shutil.rmtree`. That call only
   removes the work directory it created a few lines earlier, when QMP never comes up.
   Nothing that existed before the call is touched. Marking it destructive would make

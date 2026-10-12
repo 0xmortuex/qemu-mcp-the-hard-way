@@ -230,8 +230,9 @@ def qemu_type(name: str, text: str) -> str:
     return f"typed {len(text)} characters into {name!r}"
 
 
-# Kills the VM and deletes its files. Not idempotent: a second call raises.
-@tool(read_only=False, destructive=True, idempotent=False, open_world=False)
+# Kills the VM and deletes its files. Idempotent in MCP's sense: a second
+# call changes nothing more (it reports an error).
+@tool(read_only=False, destructive=True, idempotent=True, open_world=False)
 def qemu_stop(name: str) -> str:
     """Stop the VM and delete its temporary files."""
     vm = get_vm(name)

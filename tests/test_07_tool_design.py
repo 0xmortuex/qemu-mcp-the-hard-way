@@ -33,7 +33,7 @@ HINTS = {
     "qemu_boot":        (False,    False,      False,     False),
     "qemu_wait_serial": (True,     False,      True,      False),
     "qemu_type":        (False,    True,       False,     False),
-    "qemu_stop":        (False,    True,       False,     False),
+    "qemu_stop":        (False,    True,       True,      False),
     "demo_unwrapped_error": (True, False,      True,      False),
 }
 
@@ -112,6 +112,6 @@ async def test_full_lifecycle() -> None:
 
         err, text = await call(s, "qemu_stop", name="t")
         assert not err and text == "stopped 't'"
-        # Not idempotent, as its hints say: a second stop is an error.
+        # A second stop changes nothing (idempotent), and says why.
         err, text = await call(s, "qemu_stop", name="t")
         assert err and "no VM named 't'" in text
