@@ -105,16 +105,12 @@ The fix is one wrapper at the tool boundary:
 ```python
 EXPECTED = (KeyError, ValueError, FileNotFoundError, RuntimeError, TimeoutError, OSError)
 
-def tool(fn):
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        try:
-            return fn(*args, **kwargs)
-        except EXPECTED as e:
-            msg = e.args[0] if isinstance(e, KeyError) and e.args else str(e)
-            raise ToolError(str(msg)) from e
-    mcp.tool()(wrapper)
-    return fn
+def wrapper(*args, **kwargs):          # inside @tool, around each tool function
+    try:
+        return fn(*args, **kwargs)
+    except EXPECTED as e:
+        msg = e.args[0] if isinstance(e, KeyError) and e.args else str(e)
+        raise ToolError(str(msg)) from e
 ```
 
 - **`functools.wraps`** keeps the signature and docstring, which the SDK reads to build
@@ -123,6 +119,32 @@ def tool(fn):
 - **Only expected failures are converted.** An `AttributeError` from a bug still
   becomes a hidden crash, as the SDK intends. This is not "catch everything and return a
   string".
+
+## Say What Each Tool Does to the World
+
+A client deciding whether to ask the user before a call can't read your code. MCP
+gives it four hints per tool: `readOnlyHint`, `destructiveHint`, `idempotentHint` and
+`openWorldHint`. `@tool` makes all four required keywords, so no tool can be registered
+without stating them:
+
+```python
+@tool(read_only=False, destructive=True, idempotent=False, open_world=False)
+def qemu_stop(name: str) -> str:
+```
+
+The values are claims about behaviour, so set them from the code, not from a scanner:
+
+- `qemu_wait_serial` only reads the log: read-only and idempotent.
+- `qemu_type` is destructive. Keystrokes can do anything the guest allows,
+  `rm -rf` included.
+- `qemu_stop` is destructive and *not* idempotent: a second call raises.
+- `qemu_boot` is **not** destructive, although it calls `shutil.rmtree`. That call only
+  removes the work directory it created a few lines earlier, when QMP never comes up.
+  Nothing that existed before the call is touched. Marking it destructive would make
+  clients warn on every boot, and warnings that are always on get ignored.
+
+`tests/test_07_tool_design.py` pins every value, so changing a tool's behaviour without
+its hints fails CI.
 
 ## Validation at the Boundary
 
@@ -141,6 +163,9 @@ python main.py --kernel ../kernel/kernel.elf
 ```
 tools: ['demo_unwrapped_error', 'qemu_boot', 'qemu_stop', 'qemu_type', 'qemu_wait_serial']
 qemu_boot schema params: ['name', 'kernel', 'memory_mb'] (memory_mb default 64)
+qemu_wait_serial hints: read_only=True destructive=False
+qemu_type hints: read_only=False destructive=True
+qemu_stop hints: read_only=False destructive=True
 > qemu_boot
 VM 'k' booted (pid 16724). Next: qemu_wait_serial(name='k', marker=...) for a boot marker.
 > qemu_type + qemu_wait_serial: the guest echoed 'you typed: hello agent'

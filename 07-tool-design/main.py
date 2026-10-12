@@ -122,6 +122,7 @@ def read_log(vm: VM) -> str:
 # ------------------------------------------------------------ MCP layer
 from mcp.server.mcpserver import MCPServer  # noqa: E402
 from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
+from mcp.types import ToolAnnotations  # noqa: E402
 
 mcp = MCPServer(
     "qemu-lite",
@@ -140,20 +141,32 @@ F = TypeVar("F", bound=Callable[..., Any])
 EXPECTED = (KeyError, ValueError, FileNotFoundError, RuntimeError, TimeoutError, OSError)
 
 
-def tool(fn: F) -> F:
-    @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return fn(*args, **kwargs)
-        except EXPECTED as e:
-            msg = e.args[0] if isinstance(e, KeyError) and e.args else str(e)
-            raise ToolError(str(msg)) from e
+def tool(*, read_only: bool, destructive: bool, idempotent: bool,
+         open_world: bool) -> Callable[[F], F]:
+    # All four hints are required keywords: a tool can't be registered without
+    # stating what it does to the world. Clients use them to decide when to ask
+    # the user first, and some directories reject tools that omit any of them.
+    annotations = ToolAnnotations(read_only_hint=read_only, destructive_hint=destructive,
+                                  idempotent_hint=idempotent, open_world_hint=open_world)
 
-    mcp.tool()(wrapper)
-    return fn
+    def register(fn: F) -> F:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return fn(*args, **kwargs)
+            except EXPECTED as e:
+                msg = e.args[0] if isinstance(e, KeyError) and e.args else str(e)
+                raise ToolError(str(msg)) from e
+
+        mcp.tool(annotations=annotations)(wrapper)
+        return fn
+
+    return register
 
 
-@tool
+# Creates a VM. Its only rmtree removes the workdir it made itself, moments
+# earlier, when QMP never comes up: nothing that existed before the call.
+@tool(read_only=False, destructive=False, idempotent=False, open_world=False)
 def qemu_boot(name: str, kernel: str, memory_mb: int = 64) -> str:
     """Boot a multiboot kernel headless and register it under `name`.
 
@@ -185,7 +198,7 @@ def qemu_boot(name: str, kernel: str, memory_mb: int = 64) -> str:
             f"Next: qemu_wait_serial(name={name!r}, marker=...) for a boot marker.")
 
 
-@tool
+@tool(read_only=True, destructive=False, idempotent=True, open_world=False)
 def qemu_wait_serial(name: str, marker: str, timeout_s: float = 30) -> str:
     """Wait until `marker` appears on the VM's serial console.
 
@@ -205,7 +218,8 @@ def qemu_wait_serial(name: str, marker: str, timeout_s: float = 30) -> str:
             f"Serial so far:\n{read_log(vm)[-1500:]}")
 
 
-@tool
+# Keystrokes can do anything the guest allows, including deleting its files.
+@tool(read_only=False, destructive=True, idempotent=False, open_world=False)
 def qemu_type(name: str, text: str) -> str:
     """Type text on the VM's keyboard ("\\n" presses Enter)."""
     vm = get_vm(name)
@@ -216,7 +230,8 @@ def qemu_type(name: str, text: str) -> str:
     return f"typed {len(text)} characters into {name!r}"
 
 
-@tool
+# Kills the VM and deletes its files. Not idempotent: a second call raises.
+@tool(read_only=False, destructive=True, idempotent=False, open_world=False)
 def qemu_stop(name: str) -> str:
     """Stop the VM and delete its temporary files."""
     vm = get_vm(name)
@@ -227,7 +242,8 @@ def qemu_stop(name: str) -> str:
     return f"stopped {name!r}"
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False,
+                                      idempotent_hint=True, open_world_hint=False))
 def demo_unwrapped_error(name: str) -> str:
     """Demo only: raises the same KeyError as get_vm, WITHOUT the ToolError
     conversion, to show what the agent receives."""
@@ -251,6 +267,16 @@ def demo(kernel: str) -> int:
             assert "qemu_wait_serial" in (tools["qemu_boot"].description or "")
             props = tools["qemu_boot"].input_schema["properties"]
             print(f"qemu_boot schema params: {list(props)} (memory_mb default {props['memory_mb']['default']})")
+            # Every tool states all four hints, as explicit booleans.
+            for t in tools.values():
+                a = t.annotations
+                assert a is not None, t.name
+                hints = (a.read_only_hint, a.destructive_hint, a.idempotent_hint, a.open_world_hint)
+                assert all(isinstance(h, bool) for h in hints), (t.name, hints)
+            for n in ("qemu_wait_serial", "qemu_type", "qemu_stop"):
+                a = tools[n].annotations
+                assert a is not None
+                print(f"{n} hints: read_only={a.read_only_hint} destructive={a.destructive_hint}")
 
             async def call(tool_name: str, **a: Any) -> tuple[bool, str]:
                 res = await s.call_tool(tool_name, a)

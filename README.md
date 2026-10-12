@@ -75,10 +75,13 @@ imports between modules.
 ```bash
 python 04-typing/main.py --kernel kernel/kernel.elf     # one module
 python verify.py                                         # all nine, against real QEMU
+pip install pytest && pytest tests                       # Module 07's server, over MCP
 ```
 
 Every module starts its own QEMU, waits for it properly, asserts what its README claims,
-and cleans up. CI runs `verify.py` on Ubuntu's QEMU on every push and weekly. All nine
+and cleans up. `tests/` drives Module 07's server over real MCP stdio: every tool, its
+error messages, and its read-only/destructive hints. CI runs both on Ubuntu's QEMU on
+every push and weekly. All nine
 modules were also verified on Windows with QEMU 11. Windows isn't in CI, because getting
 QEMU onto a Windows runner is harder than one apt line.
 
