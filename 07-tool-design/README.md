@@ -132,6 +132,26 @@ it kills QEMU and deletes the work directory before re-raising. Each check turns
 confusing low-level failure, such as `FileNotFoundError` from `mkdtemp` or a QEMU
 stderr dump, into a sentence the agent can act on.
 
+## Annotations Are Permissions
+
+The docstring tells the agent what a tool does. Annotations tell the *host* what it
+might break, so it can decide what to auto-approve and what to ask the user about.
+Every tool declares all four hints explicitly, because a missing hint falls back to the
+pessimistic default (destructive, open-world), and some directories reject tools
+that leave any unset:
+
+| Tool | readOnly | destructive | idempotent | openWorld |
+|------|----------|-------------|------------|-----------|
+| `qemu_boot` | false | false | false | false |
+| `qemu_wait_serial` | true | false | true | false |
+| `qemu_type` | false | **true** | false | false |
+| `qemu_stop` | false | **true** | false | false |
+
+`qemu_boot` deletes a directory on failure, but only the one it just made, so it isn't
+destructive. `qemu_type` is: the guest decides what keystrokes mean, and `poweroff\n`
+is just text. `openWorld` is false throughout, since nothing here leaves the machine.
+Hints are claims, not enforcement. A host trusts them only as far as it trusts you.
+
 ## Run It
 
 ```bash
@@ -141,6 +161,7 @@ python main.py --kernel ../kernel/kernel.elf
 ```
 tools: ['demo_unwrapped_error', 'qemu_boot', 'qemu_stop', 'qemu_type', 'qemu_wait_serial']
 qemu_boot schema params: ['name', 'kernel', 'memory_mb'] (memory_mb default 64)
+annotations: demo_unwrapped_error(ro), qemu_boot(write), qemu_stop(destructive), qemu_type(destructive), qemu_wait_serial(ro)
 > qemu_boot
 VM 'k' booted (pid 16724). Next: qemu_wait_serial(name='k', marker=...) for a boot marker.
 > qemu_type + qemu_wait_serial: the guest echoed 'you typed: hello agent'

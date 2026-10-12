@@ -122,6 +122,7 @@ def read_log(vm: VM) -> str:
 # ------------------------------------------------------------ MCP layer
 from mcp.server.mcpserver import MCPServer  # noqa: E402
 from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
+from mcp.types import ToolAnnotations  # noqa: E402
 
 mcp = MCPServer(
     "qemu-lite",
@@ -140,20 +141,33 @@ F = TypeVar("F", bound=Callable[..., Any])
 EXPECTED = (KeyError, ValueError, FileNotFoundError, RuntimeError, TimeoutError, OSError)
 
 
-def tool(fn: F) -> F:
-    @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return fn(*args, **kwargs)
-        except EXPECTED as e:
-            msg = e.args[0] if isinstance(e, KeyError) and e.args else str(e)
-            raise ToolError(str(msg)) from e
-
-    mcp.tool()(wrapper)
-    return fn
+def hints(*, read_only: bool, destructive: bool, idempotent: bool) -> ToolAnnotations:
+    # All four, every time: a host that finds one missing assumes the worst
+    # default (destructive, open-world) and may refuse or nag. openWorld is
+    # always False - these tools touch a local VM, never the internet.
+    return ToolAnnotations(read_only_hint=read_only, destructive_hint=destructive,
+                           idempotent_hint=idempotent, open_world_hint=False)
 
 
-@tool
+def tool(annotations: ToolAnnotations) -> Callable[[F], F]:
+    def register(fn: F) -> F:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return fn(*args, **kwargs)
+            except EXPECTED as e:
+                msg = e.args[0] if isinstance(e, KeyError) and e.args else str(e)
+                raise ToolError(str(msg)) from e
+
+        mcp.tool(annotations=annotations)(wrapper)
+        return fn
+
+    return register
+
+
+# Starts a process and makes a temp dir. Its only rmtree is of the directory
+# it just created, on failure - nothing that existed before is touched.
+@tool(hints(read_only=False, destructive=False, idempotent=False))
 def qemu_boot(name: str, kernel: str, memory_mb: int = 64) -> str:
     """Boot a multiboot kernel headless and register it under `name`.
 
@@ -185,7 +199,7 @@ def qemu_boot(name: str, kernel: str, memory_mb: int = 64) -> str:
             f"Next: qemu_wait_serial(name={name!r}, marker=...) for a boot marker.")
 
 
-@tool
+@tool(hints(read_only=True, destructive=False, idempotent=True))
 def qemu_wait_serial(name: str, marker: str, timeout_s: float = 30) -> str:
     """Wait until `marker` appears on the VM's serial console.
 
@@ -205,7 +219,9 @@ def qemu_wait_serial(name: str, marker: str, timeout_s: float = 30) -> str:
             f"Serial so far:\n{read_log(vm)[-1500:]}")
 
 
-@tool
+# Destructive: the guest decides what keystrokes mean, and "poweroff\n" is
+# just text. The host can't know, so it should ask.
+@tool(hints(read_only=False, destructive=True, idempotent=False))
 def qemu_type(name: str, text: str) -> str:
     """Type text on the VM's keyboard ("\\n" presses Enter)."""
     vm = get_vm(name)
@@ -216,7 +232,7 @@ def qemu_type(name: str, text: str) -> str:
     return f"typed {len(text)} characters into {name!r}"
 
 
-@tool
+@tool(hints(read_only=False, destructive=True, idempotent=False))
 def qemu_stop(name: str) -> str:
     """Stop the VM and delete its temporary files."""
     vm = get_vm(name)
@@ -227,7 +243,7 @@ def qemu_stop(name: str) -> str:
     return f"stopped {name!r}"
 
 
-@mcp.tool()
+@mcp.tool(annotations=hints(read_only=True, destructive=False, idempotent=True))
 def demo_unwrapped_error(name: str) -> str:
     """Demo only: raises the same KeyError as get_vm, WITHOUT the ToolError
     conversion, to show what the agent receives."""
@@ -251,6 +267,17 @@ def demo(kernel: str) -> int:
             assert "qemu_wait_serial" in (tools["qemu_boot"].description or "")
             props = tools["qemu_boot"].input_schema["properties"]
             print(f"qemu_boot schema params: {list(props)} (memory_mb default {props['memory_mb']['default']})")
+            # Every tool declares all four hints, so a host can warn before
+            # qemu_type or qemu_stop and auto-approve qemu_wait_serial.
+            for t in tools.values():
+                a = t.annotations
+                assert a is not None and None not in (
+                    a.read_only_hint, a.destructive_hint, a.idempotent_hint, a.open_world_hint), t.name
+            assert tools["qemu_wait_serial"].annotations.read_only_hint  # type: ignore[union-attr]
+            assert tools["qemu_stop"].annotations.destructive_hint  # type: ignore[union-attr]
+            print("annotations: " + ", ".join(
+                f"{n}({'ro' if t.annotations.read_only_hint else 'destructive' if t.annotations.destructive_hint else 'write'})"  # type: ignore[union-attr]
+                for n, t in sorted(tools.items())))
 
             async def call(tool_name: str, **a: Any) -> tuple[bool, str]:
                 res = await s.call_tool(tool_name, a)
